@@ -1544,7 +1544,7 @@ export default function JaysNewWayPractitioner() {
     const newMessages = [...messages, { role: "user", content: input }];
     setMessages(newMessages); setInput(""); setIsTyping(true);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/chat", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1200, system: SUPERVISOR_PROMPT, messages: newMessages.map(m => ({ role: m.role, content: m.content })) }),
       });
@@ -1559,7 +1559,7 @@ export default function JaysNewWayPractitioner() {
     const newMessages = [...mbMessages, { role: "user", content: mbInput }];
     setMbMessages(newMessages); setMbInput(""); setMbTyping(true);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/chat", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1200, system: AI_PROMPT, messages: newMessages.map(m => ({ role: m.role, content: m.content })) }),
       });
