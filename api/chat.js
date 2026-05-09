@@ -1,13 +1,3 @@
-/**
- * PRACTITIONER APP — /api/chat.js WITH RAG
- * =========================================
- * This version has lower similarity threshold and larger context
- * to ensure mind/body organ data is reliably retrieved.
- *
- * Replace /api/chat.js in the PRACTITIONER GitHub repo with this file.
- * The other two apps use 3_chat_with_rag.js (standard version).
- */
-
 const { createClient } = require('@supabase/supabase-js');
 
 const MATCH_COUNT = 10;         // Retrieve more chunks for detailed organ queries
