@@ -132,15 +132,46 @@ async function keywordSearch(supabase, organSource) {
 }
 
 async function retrieveRelevantContext(queryEmbedding, userMessage, supabase) {
-  // Try semantic search first
-  let results = await semanticSearch(supabase, queryEmbedding);
+  // Always run keyword search for organ queries alongside semantic search
+  const organSource = detectOrganSource(userMessage);
+  let keywordResults = [];
   
-  // If no semantic results, try source-aware keyword fallback
-  if (results.length === 0) {
-    const organSource = detectOrganSource(userMessage);
-    if (organSource) {
-      console.log(`RAG: Semantic failed, trying source-aware keyword search: "${organSource.keyword}" in ${organSource.source}`);
-      results = await keywordSearch(supabase, organSource);
+  if (organSource) {
+    console.log(`RAG: Organ query detected — running keyword search for "${organSource.keyword}" in ${organSource.source}`);
+    keywordResults = await keywordSearch(supabase, organSource);
+    
+    // Also search specifically in the organ index
+    const { data: indexData } = await supabase
+      .from('document_chunks')
+      .select('id, content, source, chunk_index')
+      .ilike('source', '%ORGAN_INDEX%')
+      .ilike('content', `%${organSource.keyword}%`)
+      .limit(15);
+    
+    if (indexData && indexData.length > 0) {
+      console.log(`RAG: Found ${indexData.length} chunks in ORGAN INDEX`);
+      indexData.forEach(row => {
+        if (!keywordResults.find(r => r.id === row.id)) {
+          keywordResults.push({ ...row, similarity: 0.9, keyword_match: true, priority: true });
+        }
+      });
+    }
+  }
+
+  // Run semantic search
+  let semanticResults = await semanticSearch(supabase, queryEmbedding);
+  
+  // If organ query — prioritise organ index and keyword results over semantic
+  let results;
+  if (organSource && keywordResults.length > 0) {
+    // Put organ index results first, then semantic results
+    const semanticFiltered = semanticResults.filter(r => !keywordResults.find(k => k.id === r.id));
+    results = [...keywordResults, ...semanticFiltered];
+    console.log(`RAG: Combined ${keywordResults.length} keyword + ${semanticFiltered.length} semantic results`);
+  } else {
+    results = semanticResults;
+    if (results.length === 0 && organSource) {
+      results = keywordResults;
     }
   }
 
