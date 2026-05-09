@@ -4,23 +4,72 @@ const MATCH_COUNT = 10;
 const MATCH_THRESHOLD = 0.15;
 const MAX_CONTEXT_CHARS = 18000;
 
-// Organ keywords that trigger keyword-based fallback search
-const ORGAN_KEYWORDS = [
-  'liver', 'heart', 'lung', 'lungs', 'kidney', 'kidneys', 'stomach', 
-  'intestine', 'intestines', 'bowel', 'colon', 'pancreas', 'gallbladder',
-  'gall bladder', 'thyroid', 'adrenal', 'bladder', 'prostate', 'uterus',
-  'ovary', 'ovaries', 'breast', 'skin', 'bone', 'muscle', 'spine',
-  'lymph', 'lymphatic', 'immune', 'blood', 'cardiovascular', 'respiratory',
-  'digestive', 'nervous', 'endocrine', 'reproductive', 'urinary', 'skeletal',
-  'muscular', 'sinuses', 'sinus', 'appendix', 'spleen', 'hypothyroid',
-  'hyperthyroid', 'diabetes', 'cancer', 'hepatitis', 'cirrhosis', 'asthma',
-  'arthritis', 'fibromyalgia', 'chronic fatigue', 'ms', 'parkinson',
-  'epilepsy', 'psoriasis', 'eczema', 'crohn', 'ibs', 'colitis'
-];
+// Map organ/condition keywords to their source document names
+const ORGAN_SOURCE_MAP = {
+  'liver': 'DIGESTIVE SYSTEM',
+  'gallbladder': 'DIGESTIVE SYSTEM',
+  'gall bladder': 'DIGESTIVE SYSTEM',
+  'stomach': 'DIGESTIVE SYSTEM',
+  'intestine': 'DIGESTIVE SYSTEM',
+  'intestines': 'DIGESTIVE SYSTEM',
+  'bowel': 'DIGESTIVE SYSTEM',
+  'colon': 'DIGESTIVE SYSTEM',
+  'pancreas': 'DIGESTIVE SYSTEM',
+  'digestive': 'DIGESTIVE SYSTEM',
+  'hepatitis': 'DIGESTIVE SYSTEM',
+  'cirrhosis': 'DIGESTIVE SYSTEM',
+  'heart': 'CARDIOVASCULAR SYSTEM',
+  'cardiovascular': 'CARDIOVASCULAR SYSTEM',
+  'blood pressure': 'CARDIOVASCULAR SYSTEM',
+  'lung': 'RESPIRATORY SYSTEM',
+  'lungs': 'RESPIRATORY SYSTEM',
+  'respiratory': 'RESPIRATORY SYSTEM',
+  'asthma': 'RESPIRATORY SYSTEM',
+  'bronchitis': 'RESPIRATORY SYSTEM',
+  'kidney': 'URINARY SYSTEM',
+  'kidneys': 'URINARY SYSTEM',
+  'urinary': 'URINARY SYSTEM',
+  'bladder': 'URINARY SYSTEM',
+  'lymph': 'LYMPHATIC SYSTEM',
+  'lymphatic': 'LYMPHATIC SYSTEM',
+  'immune': 'IMMUNE SYSTEM',
+  'muscle': 'MUSCULAR SYSTEM',
+  'muscular': 'MUSCULAR SYSTEM',
+  'fibromyalgia': 'MUSCULAR SYSTEM',
+  'bone': 'SKELETAL SYSTEM',
+  'skeletal': 'SKELETAL SYSTEM',
+  'arthritis': 'SKELETAL SYSTEM',
+  'osteoporosis': 'SKELETAL SYSTEM',
+  'skin': 'SKIN',
+  'psoriasis': 'SKIN',
+  'eczema': 'SKIN',
+  'dermatitis': 'SKIN',
+  'prostate': 'REPRODUCTIVE SYSTEM',
+  'uterus': 'REPRODUCTIVE SYSTEM',
+  'ovary': 'REPRODUCTIVE SYSTEM',
+  'ovaries': 'REPRODUCTIVE SYSTEM',
+  'reproductive': 'REPRODUCTIVE SYSTEM',
+  'thyroid': 'SYSTEMS OF CONTROL',
+  'adrenal': 'SYSTEMS OF CONTROL',
+  'endocrine': 'SYSTEMS OF CONTROL',
+  'hypothyroid': 'SYSTEMS OF CONTROL',
+  'hyperthyroid': 'SYSTEMS OF CONTROL',
+  'cancer': 'CANCER',
+  'chronic fatigue': 'CHRONIC FATIGUE',
+  'fatigue': 'CHRONIC FATIGUE',
+  'left side': 'LEFT SIDE VS RIGHT SIDE',
+  'right side': 'LEFT SIDE VS RIGHT SIDE',
+  'water': 'WATER AND ITS ROLE',
+};
 
-function detectOrganKeywords(text) {
+function detectOrganSource(text) {
   const lower = text.toLowerCase();
-  return ORGAN_KEYWORDS.filter(kw => lower.includes(kw));
+  for (const [keyword, source] of Object.entries(ORGAN_SOURCE_MAP)) {
+    if (lower.includes(keyword)) {
+      return { keyword, source };
+    }
+  }
+  return null;
 }
 
 async function getQueryEmbedding(text) {
@@ -50,37 +99,48 @@ async function semanticSearch(supabase, queryEmbedding) {
   return data || [];
 }
 
-async function keywordSearch(supabase, keywords) {
-  // Search for chunks containing any of the detected organ keywords
-  const results = [];
-  for (const keyword of keywords.slice(0, 3)) { // Max 3 keywords
-    const { data, error } = await supabase
-      .from('document_chunks')
-      .select('id, content, source, chunk_index')
-      .ilike('content', `%${keyword}%`)
-      .limit(15);
-    
-    if (!error && data) {
-      data.forEach(row => {
-        if (!results.find(r => r.id === row.id)) {
-          results.push({ ...row, similarity: 0.5, keyword_match: true });
-        }
-      });
-    }
+async function keywordSearch(supabase, organSource) {
+  // Search specifically within the correct source document
+  const { keyword, source } = organSource;
+  
+  // First try: get ALL chunks from the correct source document
+  const { data: sourceData, error: sourceError } = await supabase
+    .from('document_chunks')
+    .select('id, content, source, chunk_index')
+    .ilike('source', `%${source}%`)
+    .ilike('content', `%${keyword}%`)
+    .limit(15);
+  
+  if (!sourceError && sourceData && sourceData.length > 0) {
+    console.log(`RAG keyword: Found ${sourceData.length} chunks in ${source} containing "${keyword}"`);
+    return sourceData.map(row => ({ ...row, similarity: 0.6, keyword_match: true }));
   }
-  return results;
+  
+  // Fallback: search all documents for the keyword
+  const { data, error } = await supabase
+    .from('document_chunks')
+    .select('id, content, source, chunk_index')
+    .ilike('content', `%${keyword}%`)
+    .limit(15);
+  
+  if (!error && data) {
+    console.log(`RAG keyword fallback: Found ${data.length} chunks containing "${keyword}"`);
+    return data.map(row => ({ ...row, similarity: 0.4, keyword_match: true }));
+  }
+  
+  return [];
 }
 
 async function retrieveRelevantContext(queryEmbedding, userMessage, supabase) {
   // Try semantic search first
   let results = await semanticSearch(supabase, queryEmbedding);
   
-  // If no semantic results, try keyword fallback for organ queries
+  // If no semantic results, try source-aware keyword fallback
   if (results.length === 0) {
-    const keywords = detectOrganKeywords(userMessage);
-    if (keywords.length > 0) {
-      console.log(`RAG: Semantic failed, trying keyword search for: ${keywords.join(', ')}`);
-      results = await keywordSearch(supabase, keywords);
+    const organSource = detectOrganSource(userMessage);
+    if (organSource) {
+      console.log(`RAG: Semantic failed, trying source-aware keyword search: "${organSource.keyword}" in ${organSource.source}`);
+      results = await keywordSearch(supabase, organSource);
     }
   }
 
