@@ -143,6 +143,7 @@ export default async function handler(req, res) {
 
       if (retrievedContext) {
         console.log(`RAG: Retrieved ${retrievedContext.length} chars of context`);
+        console.log(`RAG CONTENT PREVIEW: ${retrievedContext.slice(0, 500)}`);
       } else {
         console.log('RAG: No context found — using base system prompt only');
       }
